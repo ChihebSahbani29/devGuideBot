@@ -346,23 +346,23 @@ class RedisDatabase:
 
             # Build KNN query with proper syntax
             query_base = f"*=>[KNN {k} @{vector_field} $vec AS vector_score]"
-            # if filter_expression and filter_expression.strip():
-            #     # Split filters et normaliser
-            #     parts = []
-            #     for expr in filter_expression.split():
-            #         if ":" in expr:
-            #             field, value = expr.split(":", 1)
-            #             value = value.strip()
-            #
-            #             # Si la valeur est alphanumérique simple -> wrap avec {}
-            #             if not (value.startswith("{") or value.startswith("(") or value.startswith('"')):
-            #                 value = f"{{{value}}}"
-            #
-            #             parts.append(f"{field}:{value}")
-            #
-            #     # Joindre avec &&
-            #     normalized_filter = " && ".join(parts)
-            #     query_base = f"({normalized_filter})=>[KNN {k} @{vector_field} $vec AS vector_score]"
+            if filter_expression and filter_expression.strip():
+                # Split filters et normaliser
+                parts = []
+                for expr in filter_expression.split():
+                    if ":" in expr:
+                        field, value = expr.split(":", 1)
+                        value = value.strip()
+
+                        # Si la valeur est alphanumérique simple -> wrap avec {}
+                        if not (value.startswith("{") or value.startswith("(") or value.startswith('"')):
+                            value = f"{{{value}}}"
+
+                        parts.append(f"{field}:{value}")
+
+                # Joindre avec &&
+                normalized_filter = " && ".join(parts)
+                query_base = f"({normalized_filter})=>[KNN {k} @{vector_field} $vec AS vector_score]"
             query = (
                 Query(query_base)
                 .return_fields(*return_fields, "vector_score")

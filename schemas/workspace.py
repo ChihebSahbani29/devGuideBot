@@ -28,6 +28,7 @@ class GitConfig(BaseModel):
     access_token: str
     default_owner: str = Field(..., description="The owner/username of the repository")
     default_repo: str = Field(..., description="The name of the repository")
+    default_branch: str = Field(default='develop', description="The default branch to use for the repository")
 
 class WorkspaceCreateRequest(BaseModel):
     """Request model for creating a new workspace."""

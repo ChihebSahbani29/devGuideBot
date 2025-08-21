@@ -342,7 +342,7 @@ class GitHubAgent(BaseAgent):
 
         owner = kwargs.get('owner', self.default_owner)
         repo = kwargs.get('repo', self.default_repo)
-        ref = kwargs.get('ref', 'main')
+        ref = kwargs.get('ref', 'develop')
 
         # If specific repositories are provided, use those
         repos_to_ingest = []

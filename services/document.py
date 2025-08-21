@@ -317,12 +317,6 @@ class DocumentService:
 
         # Prepare filter expression for Redis search
         filter_parts = [f"@workspace_id:{workspace_id}"]
-        if source_types:
-            source_types_str = "|".join([st.value for st in source_types])
-            filter_parts.append(f"@source_type:({source_types_str})")
-        if source_ids:
-            source_ids_str = "|".join(source_ids)
-            filter_parts.append(f"@source_id:({source_ids_str})")
 
 
         # Perform vector search in Redis
@@ -337,7 +331,6 @@ class DocumentService:
             score_threshold=score_threshold,
             filter_expression=filter_expression
         )
-        print("search_results__", search_results)
         if not search_results:
             return []
 
