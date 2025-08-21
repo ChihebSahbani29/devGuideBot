@@ -36,12 +36,6 @@ A smart assistant for developers with document search and chat capabilities powe
    pip install -r requirements.txt
    ```
 
-4. Copy the example environment file and update with your configuration:
-   ```bash
-   cp .env.example .env
-   # Edit .env with your configuration
-   ```
-
 ## Configuration
 
 Update the following environment variables in your `.env` file:
@@ -77,8 +71,6 @@ REDIS_URL=redis://localhost:6379/0
 ### Chat
 
 - `POST /chat/` - Send a message and get a response
-- `POST /chat/stream` - Stream chat responses
-
 ### Documents
 
 - `POST /workspaces/{workspace_id}/documents` - Upload a document
