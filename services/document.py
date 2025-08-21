@@ -384,7 +384,7 @@ class DocumentService:
                 source_types=query.source_types,
                 source_ids=query.source_ids,
                 limit=query.limit + query.skip,  # Get enough results for pagination
-                score_threshold=0.7
+                score_threshold=0.0
             )
 
             # Apply pagination
