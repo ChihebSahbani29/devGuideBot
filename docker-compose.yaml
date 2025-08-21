@@ -1,0 +1,43 @@
+version: "3.8"
+
+services:
+  mongo:
+    image: mongo:6.0
+    container_name: devguidebot-mongo
+    restart: always
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  redis:
+    image: redis/redis-stack:latest
+    container_name: devguidebot-redis
+    restart: always
+    ports:
+      - "6379:6379"
+      - "8001:8001"  # RedisInsight web UI
+    volumes:
+      - redis_data:/data
+    environment:
+      - REDIS_STACK_DATA_DIR=/data
+
+  app:
+    build: .
+    container_name: devguidebot-app
+    restart: always
+    depends_on:
+      - mongo
+      - redis
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+    command: >
+      sh -c "uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+
+volumes:
+  mongo_data:
+  redis_data:
