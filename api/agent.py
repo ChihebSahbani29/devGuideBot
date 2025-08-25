@@ -15,6 +15,8 @@ from schemas.agent import (
     AgentListResponse,
     AgentExecutionRequest,
     AgentExecutionResponse,
+    AgentConnectionVerifyRequest,
+    AgentConnectionVerifyResponse,
 )
 from services.agent import AgentService
 
@@ -202,3 +204,47 @@ async def execute_agent(
         workspace_id=workspace_id,
         execution_request=execution_request,
     )
+
+
+@router.post(
+    "/verify-connection",
+    response_model=AgentConnectionVerifyResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Verify agent connection",
+    description="Verify the connection to an agent's data source without persisting it.",
+    responses={
+        200: {"description": "Connection verification result"},
+        400: {"description": "Invalid request or configuration"},
+        500: {"description": "Internal server error during verification"},
+    }
+)
+async def verify_agent_connection(
+        verify_request: AgentConnectionVerifyRequest,
+        agent_service: AgentService = Depends(get_agent_service),
+):
+    """Verify connection to an agent's data source without persisting it.
+    
+    This endpoint allows testing agent connections before creating or updating them.
+    The configuration should be provided with the agent type as the top-level key,
+    for example: {"github": {"access_token": "..."}}
+    """
+    try:
+        result = await agent_service.verify_agent_connection(verify_request.config)
+        return AgentConnectionVerifyResponse(
+            success=result['success'],
+            agent_type=result['agent_type'],
+            message=result['message'],
+            error=result['error'],
+            details=result['details']
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Error verifying agent connection: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while verifying the connection"
+        )

@@ -103,8 +103,76 @@ class AgentService:
             skip=skip,
             limit=limit,
             agent_type=agent_type.value if agent_type else None,
-            enabled=enabled
+            enabled=enabled if enabled is not None else None,
         )
+        
+    async def verify_agent_connection(
+            self,
+            config: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Verify connection to an agent's data source without persisting it.
+        
+        Args:
+            config: Agent configuration with the top-level key as the agent type
+                (e.g., {'github': {...}})
+                
+        Returns:
+            Dict with verification results including success status and details
+            
+        Raises:
+            ValueError: If the agent type is invalid or configuration is missing
+        """
+        if not config or not isinstance(config, dict):
+            raise ValueError("Configuration must be a non-empty dictionary")
+            
+        # Extract agent type from the config (first and only key)
+        agent_types = list(config.keys())
+        if len(agent_types) != 1:
+            raise ValueError("Configuration must contain exactly one agent type")
+            
+        agent_type_str = agent_types[0]
+        try:
+            agent_type = AgentType(agent_type_str.lower())
+        except ValueError as e:
+            raise ValueError(f"Unsupported agent type: {agent_type_str}") from e
+            
+        agent_config = config[agent_type_str]
+        
+        # Create a temporary agent instance to verify connection
+        try:
+            # Initialize the agent with the provided config
+            agent = await initialize_agent(agent_type.value, config_override=agent_config)
+            
+            # Verify the connection
+            result = await agent.verify_connection()
+            
+            # Check if the verification was successful
+            is_success = getattr(result, 'success', False) or getattr(result, 'status', None) == AgentStatus.ACTIVE
+            
+            # Clean up any resources
+            if hasattr(agent, 'close') and callable(getattr(agent, 'close')):
+                await agent.close()
+                
+            return {
+                'success': is_success,
+                'agent_type': agent_type.value,
+                'message': 'Connection verified successfully' if is_success else 'Connection verification failed',
+                'error': None if is_success else getattr(result, 'error', 'Unknown error'),
+                'details': {
+                    'status': getattr(result, 'status', None),
+                    'data': getattr(result, 'data', None)
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error verifying agent connection: {str(e)}", exc_info=True)
+            return {
+                'success': False,
+                'agent_type': agent_type.value,
+                'message': 'Connection verification failed',
+                'error': str(e),
+                'details': None
+            }
 
     async def update_agent(
             self,

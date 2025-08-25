@@ -123,6 +123,23 @@ class AgentExecutionRequest(BaseModel):
     )
 
 
+class AgentConnectionVerifyRequest(BaseModel):
+    """Request model for verifying agent connection."""
+    config: Dict[str, Any] = Field(
+        ...,
+        description="Agent configuration to verify. The top-level key should be the agent type (e.g., 'github', 'gitlab')."
+    )
+
+
+class AgentConnectionVerifyResponse(BaseModel):
+    """Response model for agent connection verification."""
+    success: bool
+    agent_type: str
+    message: str
+    error: Optional[str] = None
+    details: Optional[Dict[str, Any]] = None
+
+
 class AgentExecutionResponse(BaseModel):
     """Response model for agent execution results."""
     success: bool

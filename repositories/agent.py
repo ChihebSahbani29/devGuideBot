@@ -1,4 +1,5 @@
 """Repository for agent data access."""
+import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -6,6 +7,8 @@ from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorCollection
 
 from schemas.agent import AgentStatus
+
+logger = logging.getLogger(__name__)
 
 
 class AgentRepository:
@@ -137,7 +140,6 @@ class AgentRepository:
                 query["type"] = agent_type
             if enabled is not None:
                 query["enabled"] = enabled
-
             cursor = self.col.find(query).skip(skip).limit(limit)
             agents = []
 
@@ -148,12 +150,10 @@ class AgentRepository:
                 result["workspace_id"] = str(result["workspace_id"])
 
                 # Ensure all datetime objects are timezone-aware
-                if 'created_at' in result and result['created_at'] and not result['created_at'].tzinfo:
-                    result['created_at'] = result['created_at'].replace(tzinfo=datetime.timezone.utc)
                 if 'updated_at' in result and result['updated_at'] and not result['updated_at'].tzinfo:
-                    result['updated_at'] = result['updated_at'].replace(tzinfo=datetime.timezone.utc)
+                    result['updated_at'] = datetime.utcnow()
                 if 'last_active_at' in result and result['last_active_at'] and not result['last_active_at'].tzinfo:
-                    result['last_active_at'] = result['last_active_at'].replace(tzinfo=datetime.timezone.utc)
+                    result['last_active_at'] = datetime.utcnow()
 
                 result.setdefault("data", {})  # Ensure data field exists
                 agents.append(result)
@@ -162,8 +162,7 @@ class AgentRepository:
 
         except Exception as e:
             logger.error(f"Error listing agents for workspace {workspace_id}: {str(e)}")
-            return []
-            raise ValueError(error_msg) from e
+            raise e
 
     async def update_agent(
             self,

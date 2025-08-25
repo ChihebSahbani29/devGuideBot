@@ -194,7 +194,7 @@ class GitHubAgent(BaseAgent):
                 status=AgentStatus.ACTIVE,
                 enabled=True,
                 config=self.config,
-                capabilities=await self._get_agent_capabilities(),
+                capabilities=await self.get_capabilities(),
                 workspace_id="",
                 created_at=datetime.utcnow(),
                 updated_at=datetime.utcnow(),
