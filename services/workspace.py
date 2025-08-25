@@ -5,6 +5,7 @@ from typing import Optional, Dict, Any
 
 from fastapi import HTTPException, status
 
+from config.agent_config import initialize_agent
 from repositories.workspace import WorkspaceRepository
 from schemas.agent import AgentStatus
 from schemas.agent import AgentType, AgentCreateRequest
@@ -28,6 +29,14 @@ class WorkspaceService:
         Returns:
             The processed data with URL objects converted to strings
         """
+        # Handle Pydantic's HttpUrl type and other URL-like objects
+        if hasattr(data, '__str__') and not isinstance(data, (str, int, float, bool, type(None))):
+            if hasattr(data, '__class__') and 'Url' in data.__class__.__name__:
+                return str(data)
+            if hasattr(data, 'model_dump'):
+                return self._convert_urls_to_strings(data.model_dump())
+            return str(data)
+            
         if isinstance(data, dict):
             return {
                 k: self._convert_urls_to_strings(v)
@@ -35,8 +44,7 @@ class WorkspaceService:
             }
         elif isinstance(data, list):
             return [self._convert_urls_to_strings(item) for item in data]
-        elif hasattr(data, '__str__') and not isinstance(data, (str, int, float, bool, type(None))):
-            return str(data)
+            
         return data
 
     async def _create_agent_for_source(
@@ -232,7 +240,7 @@ class WorkspaceService:
                 "created_at": datetime.utcnow(),
                 "updated_at": datetime.utcnow()
             }
-            
+
             # Add configurations with URL objects converted to strings
             configs = {
                 'jira': jira,
@@ -241,12 +249,12 @@ class WorkspaceService:
                 'github': github,
                 'gitlab': gitlab
             }
-            
+
             for key, config in configs.items():
                 if config is not None:
                     config_dict = config.model_dump()
                     workspace_data[key] = self._convert_urls_to_strings(config_dict)
-            
+
             # Create workspace in the database
             workspace_id = await self.repo.create_workspace(workspace_data)
 
@@ -284,7 +292,7 @@ class WorkspaceService:
                         'name': gitlab_agent['name'],
                         'status': 'active'
                     }
-                    
+
             # Process SharePoint if provided
             if sharepoint:
                 sharepoint_config = sharepoint.model_dump()
@@ -364,23 +372,8 @@ class WorkspaceService:
         # Create a copy to avoid modifying the input dictionary
         processed_data = update_data.copy()
 
-        # Process data source configs to convert Pydantic models to dicts
-        for source in ['jira', 'confluence', 'sharepoint', 'github', 'gitlab']:
-            if source in processed_data:
-                if processed_data[source] is not None and hasattr(processed_data[source], 'model_dump'):
-                    processed_data[source] = processed_data[source].model_dump()
-                elif processed_data[source] is None:
-                    # Set to None to remove the config
-                    processed_data[source] = None
-
         # Convert any URL objects to strings in the processed data
         processed_data = self._convert_urls_to_strings(processed_data)
-
-        # Remove None values from update_data (except for explicit None values for removal)
-        processed_data = {
-            k: v for k, v in processed_data.items()
-            if v is not None or k in ['jira', 'confluence', 'sharepoint', 'github', 'gitlab']
-        }
 
         if not processed_data:
             return False

@@ -9,6 +9,8 @@ from pydantic import BaseModel, Field
 
 class AgentType(str, Enum):
     """Enumeration of supported agent types."""
+    CONFLUENCE = "confluence"
+    JIRA = "jira"
     GITLAB = "gitlab"
     GITHUB = "github"
     SHAREPOINT = "sharepoint"
