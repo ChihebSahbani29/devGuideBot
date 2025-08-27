@@ -19,7 +19,9 @@ from services.agent import AgentService
 from services.conversation import ConversationService
 from services.document import DocumentService
 from services.workspace import WorkspaceService
+
 logger = logging.getLogger(__name__)
+
 
 async def get_mongo_client() -> AsyncIOMotorClient:
     """Get MongoDB client instance."""
@@ -55,13 +57,6 @@ def get_conversation_repository(
     return ConversationRepository(db.get_collection("conversations"))
 
 
-def get_conversation_service(
-        repo: ConversationRepository = Depends(get_conversation_repository)
-) -> ConversationService:
-    """Get conversation service instance."""
-    return ConversationService(repo, chat_agent=get_chat_agent())
-
-
 def get_agent_repository(
         db: MongoDatabase = Depends(get_mongo_db)
 ) -> AgentRepository:
@@ -79,10 +74,9 @@ def get_document_repository(
 def get_embedding_agent() -> Optional[EmbeddingAgent]:
     """Get EmbeddingAgent instance if OpenAI API key is configured."""
     if not settings.openai.api_key:
-        
         logger.warning("OpenAI API key not configured. Embedding functionality will be disabled.")
         return None
-    
+
     return EmbeddingAgent(
         api_key=settings.openai.api_key,
         model=getattr(settings.openai, 'OPENAI_EMBEDDING_MODEL', 'text-embedding-3-small'),
@@ -91,7 +85,7 @@ def get_embedding_agent() -> Optional[EmbeddingAgent]:
 
 
 def get_chat_agent(
-    embedding_agent: Optional[EmbeddingAgent] = Depends(get_embedding_agent)
+        embedding_agent: Optional[EmbeddingAgent] = Depends(get_embedding_agent)
 ) -> Optional[ChatAgent]:
     """Get ChatAgent instance if OpenAI API key is configured.
     
@@ -102,10 +96,9 @@ def get_chat_agent(
         Configured ChatAgent instance or None if not configured
     """
     if not settings.openai.api_key:
-        
         logger.warning("OpenAI API key not configured. Chat functionality will be disabled.")
         return None
-    
+
     try:
         return ChatAgent(
             api_key=settings.openai.api_key,
@@ -115,18 +108,32 @@ def get_chat_agent(
             system_message=getattr(settings.openai, 'OPENAI_SYSTEM_MESSAGE', None)
         )
     except Exception as e:
-        
+
         logger.error(f"Failed to initialize ChatAgent: {str(e)}")
         return None
 
 
 def get_document_service(
-    repo: DocumentRepository = Depends(get_document_repository),
-    redis_db: RedisDatabase = Depends(get_redis_db),
-    embedding_agent: Optional[EmbeddingAgent] = Depends(get_embedding_agent)
+        repo: DocumentRepository = Depends(get_document_repository),
+        redis_db: RedisDatabase = Depends(get_redis_db),
+        embedding_agent: Optional[EmbeddingAgent] = Depends(get_embedding_agent)
 ) -> DocumentService:
     """Get document service instance with optional embedding support."""
     return DocumentService(repo, redis_db, embedding_agent)
+
+
+def get_conversation_service(
+        repo: ConversationRepository = Depends(get_conversation_repository),
+        chat_agent: Optional[ChatAgent] = Depends(get_chat_agent),
+        document_service: DocumentService = Depends(get_document_service)
+) -> ConversationService:
+    """Get conversation service instance."""
+    if not chat_agent:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Chat service is currently unavailable. Please check your OpenAI API key configuration."
+        )
+    return ConversationService(repo, chat_agent=chat_agent, document_service=document_service)
 
 
 def get_agent_service(
@@ -165,7 +172,7 @@ def get_mcp_settings() -> MCPSettings:
         try:
             mcp_settings = MCPSettings()
         except Exception as e:
-            
+
             logger.error(f"Error loading MCP settings: {e}", exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

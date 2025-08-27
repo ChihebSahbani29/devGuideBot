@@ -15,7 +15,7 @@ class Message(BaseModel):
 class ConversationCreateRequest(BaseModel):
     """Request model for creating a new conversation with an initial message."""
     message: str = Field(...,
-                         json_schema_extra={"description": "The initial user message that starts the conversation"})
+                        json_schema_extra={"description": "The initial user message that starts the conversation"})
     title: str | None = Field(
         None,
         json_schema_extra={

@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime
-from typing import Any
+from typing import Any, Optional
 
 from bson import ObjectId
 from fastapi import HTTPException
@@ -12,18 +12,24 @@ from schemas.conversation import (
     ConversationUpdateRequest,
     Message
 )
+from schemas.document import DocumentSearchQuery
+from services.document import DocumentService
+
 logger = logging.getLogger(__name__)
 
 
 class ConversationService:
-    def __init__(self, repo: ConversationRepository, chat_agent: ChatAgent):
-        """Initialize conversation service with repository.
+    def __init__(self, repo: ConversationRepository, chat_agent: ChatAgent, document_service: DocumentService):
+        """Initialize conversation service with repository and dependencies.
         
         Args:
             repo: Conversation repository instance
+            chat_agent: Chat agent for generating responses
+            document_service: Document service for retrieving relevant documents
         """
         self.repo = repo
         self.chat_agent = chat_agent
+        self.document_service = document_service
 
     async def create_conversation(
             self,
@@ -34,26 +40,53 @@ class ConversationService:
         
         Args:
             workspace_id: ID of the workspace
-            conversation_data: Contains the initial user message
-            chat_agent: Optional chat agent for generating responses
+            conversation_data: Contains the initial user message and chat parameters
             
         Returns:
             Dict: The created conversation data with LLM response
         """
         # Generate a title from the first message if not provided
         title = conversation_data.title or self._generate_title(conversation_data.message)
-        
+
         # Generate response using chat agent if available
         answer = ""
         if self.chat_agent:
             try:
-                # Generate response using the chat agent
+                # Search for relevant documents using vector search
+                relevant_docs = []
+                if conversation_data.message.strip():
+                    try:
+                        # Perform vector similarity search
+                        search_query = DocumentSearchQuery(
+                            query=conversation_data.message,
+                            source_types=None,  # Search across all source types
+                            source_ids=None,  # Search across all sources
+                            workspace_id=workspace_id,
+                            skip=0,
+                            limit=3  # Limit to top 3 most relevant documents
+                        )
+
+                        search_results = await self.document_service.search_documents(
+                            workspace_id=workspace_id,
+                            query=search_query
+                        )
+
+                        if search_results and search_results.items:
+                            relevant_docs = search_results.items
+                            logger.info(f"Found {len(relevant_docs)} relevant documents for conversation start")
+                    except Exception as e:
+                        logger.error(f"Error during document search: {str(e)}", exc_info=True)
+
+                # Generate response using the chat agent with the retrieved documents
                 answer = await self.chat_agent.generate_response(
                     messages=[{"role": "user", "content": conversation_data.message}],
+                    context_documents=relevant_docs,
+                    temperature=0.1,  # Keep temperature low for more focused responses
+                    max_tokens=1000,  # Limit response length
                     stream=False
                 )
             except Exception as e:
-                logger.error(f"Error generating LLM response: {str(e)}")
+                logger.error(f"Error generating LLM response: {str(e)}", exc_info=True)
                 answer = "I apologize, but I encountered an error generating a response."
 
         # Create the initial message with the generated response
@@ -126,7 +159,7 @@ class ConversationService:
                 'created_at': conversation.get('created_at'),
                 'updated_at': conversation.get('updated_at')
             }
-            
+
             # Format messages to ensure they match the Message model
             if 'messages' in conversation and isinstance(conversation['messages'], list):
                 for msg in conversation['messages']:
@@ -312,7 +345,7 @@ class ConversationService:
 
             if not updated:
                 raise ValueError(f"Conversation {conversation_id} not found in workspace {workspace_id}")
-                
+
             # Format the conversation for the response
             return {
                 'id': str(updated.get('_id', '')),
@@ -330,7 +363,7 @@ class ConversationService:
                 'created_at': updated.get('created_at'),
                 'updated_at': updated.get('updated_at')
             }
-            
+
         except Exception as e:
             raise HTTPException(
                 status_code=500,
