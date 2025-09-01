@@ -4,7 +4,7 @@ from typing import Optional, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Path
 
-from config.dependencies import get_document_service
+from config.dependencies import get_document_service, get_parser_service
 from schemas.document import (
     Document,
     DocumentCreate,
@@ -13,7 +13,10 @@ from schemas.document import (
     DocumentSearchQuery,
     DocumentSourceType
 )
+
+from schemas.parser import ParserTestRequest, ParserTestResult
 from services.document import DocumentService
+from services.parser import ParserService
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/documents/{workspace_id}/documents", tags=["documents"])
@@ -143,7 +146,7 @@ async def list_indexed_documents(
         )
 
 
-@router.delete("/", status_code=status.HTTP_200_OK, response_model=dict)
+@router.delete("/all", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_all_documents(
         workspace_id: str,
         document_service: DocumentService = Depends(get_document_service)
@@ -155,11 +158,54 @@ async def delete_all_documents(
     and their associated data from the system.
     """
     try:
-        result = await document_service.delete_all_documents(workspace_id)
-        return result
+        await document_service.delete_all_documents(workspace_id)
+        return {"status": "success", "message": f"All documents for workspace {workspace_id} have been deleted"}
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
     except Exception as e:
-        logger.error(f"Error deleting documents for workspace {workspace_id}: {str(e)}")
+        logger.exception(f"Failed to delete all documents for workspace {workspace_id}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete documents: {str(e)}"
+        )
+
+
+@router.post("/test-parser", response_model=ParserTestResult, status_code=status.HTTP_200_OK)
+async def test_parser(
+    test_request: ParserTestRequest,
+    workspace_id: str,
+    parser_service: ParserService = Depends(get_parser_service)
+):
+    """
+    Test different parsers and chunking methods on the provided content.
+    
+    This endpoint allows testing how different parsers and chunkers will process
+    content without persisting anything to the database.
+    
+    Returns:
+        ParserTestResult containing the parsed and chunked content
+    """
+    try:
+        return await parser_service.test_parse(
+            content=test_request.content,
+            content_type=test_request.content_type,
+            parser_type=test_request.parser_type,
+            chunker_type=test_request.chunker_type,
+            chunk_size=test_request.chunk_size,
+            chunk_overlap=test_request.chunk_overlap,
+            metadata=test_request.metadata or {}
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.exception("Error testing parser")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error testing parser: {str(e)}"
         )

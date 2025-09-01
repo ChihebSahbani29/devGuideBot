@@ -1,16 +1,23 @@
 import logging
-from typing import Optional
+from typing import Optional, Any, Dict
 
+from chunkers.code_chunker import CodeChunker
 from fastapi import Depends, HTTPException, status
 from motor.motor_asyncio import AsyncIOMotorClient
 from redis.asyncio import Redis
 
+from chunkers.config_chunker import ConfigChunker
+from chunkers.markdown_chunker import MarkdownChunker
 from config.connectors_settings import MCPSettings
 from config.settings import settings
 from connectors.ai_agents.chat_agent import ChatAgent
 from connectors.ai_agents.embedding_agent import EmbeddingAgent
 from db.mongo import MongoDatabase
 from db.redis import RedisDatabase
+from parsers.code_parser import CodeParser
+from parsers.config_parser import ConfigParser
+from parsers.issue_parser import IssueParser
+from parsers.markdown_parser import MarkdownParser
 from repositories.agent import AgentRepository
 from repositories.conversation import ConversationRepository
 from repositories.document import DocumentRepository
@@ -18,7 +25,9 @@ from repositories.workspace import WorkspaceRepository
 from services.agent import AgentService
 from services.conversation import ConversationService
 from services.document import DocumentService
+from services.parser import ParserService
 from services.workspace import WorkspaceService
+
 logger = logging.getLogger(__name__)
 
 async def get_mongo_client() -> AsyncIOMotorClient:
@@ -120,13 +129,84 @@ def get_chat_agent(
         return None
 
 
+def get_code_parser() -> CodeParser:
+    """Get CodeParser instance."""
+    return CodeParser()
+
+
+def get_config_parser() -> ConfigParser:
+    """Get ConfigParser instance."""
+    return ConfigParser()
+
+
+def get_issue_parser() -> IssueParser:
+    """Get IssueParser instance."""
+    return IssueParser()
+
+
+def get_markdown_parser() -> MarkdownParser:
+    """Get MarkdownParser instance."""
+    return MarkdownParser()
+
+
+def get_parsers(
+    code_parser: CodeParser = Depends(get_code_parser),
+    config_parser: ConfigParser = Depends(get_config_parser),
+    issue_parser: IssueParser = Depends(get_issue_parser),
+    markdown_parser: MarkdownParser = Depends(get_markdown_parser)
+) -> Dict[str, Any]:
+    """Get all available parsers."""
+    return {
+        'code': code_parser,
+        'config': config_parser,
+        'issue': issue_parser,
+        'markdown': markdown_parser
+    }
+
+
+def get_code_chunker() -> CodeChunker:
+    """Get CodeChunker instance."""
+    return CodeChunker()
+
+
+def get_config_chunker() -> ConfigChunker:
+    """Get ConfigChunker instance."""
+    return ConfigChunker()
+
+
+def get_markdown_chunker() -> MarkdownChunker:
+    """Get MarkdownChunker instance."""
+    return MarkdownChunker()
+
+
+def get_chunkers(
+    code_chunker: CodeChunker = Depends(get_code_chunker),
+    config_chunker: ConfigChunker = Depends(get_config_chunker),
+    markdown_chunker: MarkdownChunker = Depends(get_markdown_chunker)
+) -> Dict[str, Any]:
+    """Get all available chunkers."""
+    return {
+        'code': code_chunker,
+        'config': config_chunker,
+        'markdown': markdown_chunker
+    }
+
+
 def get_document_service(
     repo: DocumentRepository = Depends(get_document_repository),
     redis_db: RedisDatabase = Depends(get_redis_db),
-    embedding_agent: Optional[EmbeddingAgent] = Depends(get_embedding_agent)
+    embedding_agent: Optional[EmbeddingAgent] = Depends(get_embedding_agent),
+    parsers: Dict[str, Any] = Depends(get_parsers),
+    chunkers: Dict[str, Any] = Depends(get_chunkers)
 ) -> DocumentService:
-    """Get document service instance with optional embedding support."""
-    return DocumentService(repo, redis_db, embedding_agent)
+    """Get document service instance with optional embedding support, parsers, and chunkers."""
+    return DocumentService(
+        repo=repo,
+        redis_db=redis_db,
+        embedding_agent=embedding_agent,
+        parsers=parsers,
+        chunkers=chunkers
+    )
 
 
 def get_agent_service(
@@ -137,12 +217,20 @@ def get_agent_service(
     return AgentService(repo, document_service)
 
 
+def get_parser_service(
+    parsers: Dict[str, Any] = Depends(get_parsers),
+    chunkers: Dict[str, Any] = Depends(get_chunkers)
+) -> ParserService:
+    """Get parser service instance for testing parsers and chunkers."""
+    return ParserService(parsers=parsers, chunkers=chunkers)
+
+
 def get_workspace_service(
         repo: WorkspaceRepository = Depends(get_workspace_repository),
         agent_service: AgentService = Depends(get_agent_service)
 ) -> WorkspaceService:
     """Get workspace service instance."""
-    return WorkspaceService(repo, agent_service)
+    return WorkspaceService(repo=repo, agent_service=agent_service)
 
 
 # Initialize settings instances
