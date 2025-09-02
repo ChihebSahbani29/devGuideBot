@@ -168,7 +168,7 @@ class ConfigParser(BaseParser):
 
         return chunks
 
-    def parse(self, file_path: str | Path) -> List[Dict[str, str]]:
+    async def parse(self, file_path: str | Path) -> List[Dict[str, str]]:
         """Parse a configuration file and return a list of chunks."""
         try:
             with open(file_path, 'r', encoding='utf-8') as f:

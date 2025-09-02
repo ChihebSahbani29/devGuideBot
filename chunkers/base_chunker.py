@@ -16,7 +16,7 @@ class BaseChunker(ABC):
         self.overlap = overlap
 
     @abstractmethod
-    def chunk(self, content: str, metadata: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    async def chunk(self, content: str, metadata: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """Chunk the given content into smaller pieces.
         
         Args:

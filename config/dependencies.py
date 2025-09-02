@@ -1,11 +1,11 @@
 import logging
 from typing import Optional, Any, Dict
 
-from chunkers.code_chunker import CodeChunker
 from fastapi import Depends, HTTPException, status
 from motor.motor_asyncio import AsyncIOMotorClient
 from redis.asyncio import Redis
 
+from chunkers.code_chunker import CodeChunker
 from chunkers.config_chunker import ConfigChunker
 from chunkers.markdown_chunker import MarkdownChunker
 from config.connectors_settings import MCPSettings
@@ -19,6 +19,7 @@ from parsers.config_parser import ConfigParser
 from parsers.issue_parser import IssueParser
 from parsers.markdown_parser import MarkdownParser
 from repositories.agent import AgentRepository
+from repositories.chunk import ChunkRepository
 from repositories.conversation import ConversationRepository
 from repositories.document import DocumentRepository
 from repositories.workspace import WorkspaceRepository
@@ -29,6 +30,7 @@ from services.parser import ParserService
 from services.workspace import WorkspaceService
 
 logger = logging.getLogger(__name__)
+
 
 async def get_mongo_client() -> AsyncIOMotorClient:
     """Get MongoDB client instance."""
@@ -85,13 +87,19 @@ def get_document_repository(
     return DocumentRepository(db.get_collection("documents"))
 
 
+def get_chunk_repository(
+        db: MongoDatabase = Depends(get_mongo_db)
+) -> ChunkRepository:
+    """Get chunk repository instance."""
+    return ChunkRepository(db.get_collection("chunks"))
+
+
 def get_embedding_agent() -> Optional[EmbeddingAgent]:
     """Get EmbeddingAgent instance if OpenAI API key is configured."""
     if not settings.openai.api_key:
-        
         logger.warning("OpenAI API key not configured. Embedding functionality will be disabled.")
         return None
-    
+
     return EmbeddingAgent(
         api_key=settings.openai.api_key,
         model=getattr(settings.openai, 'OPENAI_EMBEDDING_MODEL', 'text-embedding-3-small'),
@@ -100,7 +108,7 @@ def get_embedding_agent() -> Optional[EmbeddingAgent]:
 
 
 def get_chat_agent(
-    embedding_agent: Optional[EmbeddingAgent] = Depends(get_embedding_agent)
+        embedding_agent: Optional[EmbeddingAgent] = Depends(get_embedding_agent)
 ) -> Optional[ChatAgent]:
     """Get ChatAgent instance if OpenAI API key is configured.
     
@@ -111,10 +119,9 @@ def get_chat_agent(
         Configured ChatAgent instance or None if not configured
     """
     if not settings.openai.api_key:
-        
         logger.warning("OpenAI API key not configured. Chat functionality will be disabled.")
         return None
-    
+
     try:
         return ChatAgent(
             api_key=settings.openai.api_key,
@@ -124,7 +131,7 @@ def get_chat_agent(
             system_message=getattr(settings.openai, 'OPENAI_SYSTEM_MESSAGE', None)
         )
     except Exception as e:
-        
+
         logger.error(f"Failed to initialize ChatAgent: {str(e)}")
         return None
 
@@ -150,17 +157,26 @@ def get_markdown_parser() -> MarkdownParser:
 
 
 def get_parsers(
-    code_parser: CodeParser = Depends(get_code_parser),
-    config_parser: ConfigParser = Depends(get_config_parser),
-    issue_parser: IssueParser = Depends(get_issue_parser),
-    markdown_parser: MarkdownParser = Depends(get_markdown_parser)
+        code_parser: CodeParser = Depends(get_code_parser),
+        config_parser: ConfigParser = Depends(get_config_parser),
+        issue_parser: IssueParser = Depends(get_issue_parser),
+        markdown_parser: MarkdownParser = Depends(get_markdown_parser)
 ) -> Dict[str, Any]:
-    """Get all available parsers."""
+    """Get all available parsers.
+    
+    Returns:
+        Dictionary mapping parser names to parser instances.
+        The 'code' parser should be used for all source code files.
+    """
     return {
-        'code': code_parser,
+        'code': code_parser,  # This handles all source code files including Python
         'config': config_parser,
         'issue': issue_parser,
-        'markdown': markdown_parser
+        'markdown': markdown_parser,
+        # Add aliases for better matching
+        'python': code_parser,
+        'py': code_parser,
+        'source': code_parser
     }
 
 
@@ -180,9 +196,9 @@ def get_markdown_chunker() -> MarkdownChunker:
 
 
 def get_chunkers(
-    code_chunker: CodeChunker = Depends(get_code_chunker),
-    config_chunker: ConfigChunker = Depends(get_config_chunker),
-    markdown_chunker: MarkdownChunker = Depends(get_markdown_chunker)
+        code_chunker: CodeChunker = Depends(get_code_chunker),
+        config_chunker: ConfigChunker = Depends(get_config_chunker),
+        markdown_chunker: MarkdownChunker = Depends(get_markdown_chunker)
 ) -> Dict[str, Any]:
     """Get all available chunkers."""
     return {
@@ -193,15 +209,17 @@ def get_chunkers(
 
 
 def get_document_service(
-    repo: DocumentRepository = Depends(get_document_repository),
-    redis_db: RedisDatabase = Depends(get_redis_db),
-    embedding_agent: Optional[EmbeddingAgent] = Depends(get_embedding_agent),
-    parsers: Dict[str, Any] = Depends(get_parsers),
-    chunkers: Dict[str, Any] = Depends(get_chunkers)
+        repo: DocumentRepository = Depends(get_document_repository),
+        redis_db: RedisDatabase = Depends(get_redis_db),
+        embedding_agent: Optional[EmbeddingAgent] = Depends(get_embedding_agent),
+        parsers: Dict[str, Any] = Depends(get_parsers),
+        chunkers: Dict[str, Any] = Depends(get_chunkers),
+        chunk_repository: ChunkRepository = Depends(get_chunk_repository),
 ) -> DocumentService:
     """Get document service instance with optional embedding support, parsers, and chunkers."""
     return DocumentService(
         repo=repo,
+        chunk_repo=chunk_repository,
         redis_db=redis_db,
         embedding_agent=embedding_agent,
         parsers=parsers,
@@ -218,8 +236,8 @@ def get_agent_service(
 
 
 def get_parser_service(
-    parsers: Dict[str, Any] = Depends(get_parsers),
-    chunkers: Dict[str, Any] = Depends(get_chunkers)
+        parsers: Dict[str, Any] = Depends(get_parsers),
+        chunkers: Dict[str, Any] = Depends(get_chunkers)
 ) -> ParserService:
     """Get parser service instance for testing parsers and chunkers."""
     return ParserService(parsers=parsers, chunkers=chunkers)
@@ -253,7 +271,7 @@ def get_mcp_settings() -> MCPSettings:
         try:
             mcp_settings = MCPSettings()
         except Exception as e:
-            
+
             logger.error(f"Error loading MCP settings: {e}", exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

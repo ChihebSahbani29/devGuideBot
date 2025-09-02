@@ -16,7 +16,7 @@ class BaseParser(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def parse(self, file_path: Union[str, Path]) -> List[Dict[str, str]]:
+    async def parse(self, file_path: Union[str, Path]) -> List[Dict[str, str]]:
         """Parse a file and return a list of chunks with metadata.
         
         Args:

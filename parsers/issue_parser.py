@@ -241,7 +241,7 @@ class IssueParser(BaseParser):
 
         return result
 
-    def parse(self, file_path: str | Path) -> List[Dict[str, str]]:
+    async def parse(self, file_path: str | Path) -> List[Dict[str, str]]:
         """Parse an issue, PR, or commit message file."""
         try:
             with open(file_path, 'r', encoding='utf-8') as f:

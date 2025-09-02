@@ -1,5 +1,6 @@
 """Schemas for parser testing and configuration."""
-from typing import Dict, List, Literal, Optional, Any
+from typing import Dict, List, Optional, Any
+
 from pydantic import BaseModel, Field
 
 

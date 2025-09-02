@@ -9,6 +9,7 @@ from chunkers.base_chunker import BaseChunker
 from connectors.ai_agents.embedding_agent import EmbeddingAgent
 from db.redis import RedisDatabase
 from parsers.base_parser import BaseParser
+from repositories.chunk import ChunkRepository
 from repositories.document import DocumentRepository
 from schemas.document import (
     Document,
@@ -29,6 +30,7 @@ class DocumentService:
     def __init__(
             self,
             repo: DocumentRepository,
+            chunk_repo: ChunkRepository,
             redis_db: RedisDatabase,
             embedding_agent: Optional[EmbeddingAgent] = None,
             parsers: Optional[Dict[str, Any]] = None,
@@ -36,22 +38,18 @@ class DocumentService:
             default_chunk_size: int = 1000,
             chunk_overlap: int = 100
     ):
-        """Initialize with document repository, Redis database, and embedding agent.
+        """Initialize with document repository, chunk repository, Redis database, and embedding agent.
         
         Args:
             repo: Document repository instance
+            chunk_repo: Chunk repository instance
             redis_db: Redis database instance
             embedding_agent: Optional embedding agent instance. If not provided,
-                           embeddings will not be generated for documents.
-            parsers: Dictionary of parsers to use for different file types.
-                   Should be provided via dependency injection.
-            chunkers: Dictionary of chunkers to use for different content types.
-                    Should be provided via dependency injection.
-            default_chunk_size: Default maximum size of each chunk in tokens.
-            chunk_overlap: Number of tokens to overlap between chunks.
-            
-        Raises:
-            ValueError: If required parsers or chunkers are not provided
+                embeddings will not be generated for chunks.
+            parsers: Dictionary of available parsers by name
+            chunkers: Dictionary of available chunkers by name
+            default_chunk_size: Default chunk size in characters
+            chunk_overlap: Default overlap between chunks in characters
         """
         if not parsers:
             raise ValueError("Parsers dictionary must be provided via dependency injection")
@@ -59,6 +57,7 @@ class DocumentService:
             raise ValueError("Chunkers dictionary must be provided via dependency injection")
 
         self.repo = repo
+        self.chunk_repo = chunk_repo
         self.redis = redis_db
         self.embedding_agent = embedding_agent
         self.parsers = parsers
@@ -95,16 +94,39 @@ class DocumentService:
         file_extension = None
         if hasattr(document, 'metadata') and 'file_extension' in document.metadata:
             file_extension = document.metadata['file_extension']
+        elif hasattr(document, 'content_type') and document.content_type:
+            # Try to extract file extension from content type
+            if 'python' in document.content_type:
+                file_extension = 'py'
+            elif 'javascript' in document.content_type:
+                file_extension = 'js'
+            # Add other content type mappings as needed
 
+        # If we have a file extension, find a parser that supports it
         if file_extension:
-            # Use the file extension to get the appropriate parser
+            # Normalize file extension (remove leading dot and convert to lowercase)
+            file_extension = file_extension.lstrip('.').lower()
+            
+            # First try to find a parser that explicitly supports this extension
             for parser in self.parsers.values():
-                if file_extension in parser.supported_formats():
+                if hasattr(parser, 'supported_formats') and file_extension in parser.supported_formats():
                     return parser
+            
+            # If no explicit match, try to find a parser that can handle the file
+            for parser in self.parsers.values():
+                if hasattr(parser, 'get_parser_for_file'):
+                    parser_instance = parser.get_parser_for_file(f'file.{file_extension}')
+                    if parser_instance:
+                        return parser_instance
 
-        # Default to markdown parser for text content
-        if 'text/' in getattr(document, 'content_type', '') or 'markdown' in getattr(document, 'content_type', ''):
+        # Check content type for text or markdown
+        content_type = getattr(document, 'content_type', '').lower()
+        if 'text/' in content_type or 'markdown' in content_type:
             return self.parsers.get('markdown')
+            
+        # If we have a code parser and no other parser was found, default to it
+        if 'code' in self.parsers:
+            return self.parsers['code']
 
         return None
 
@@ -145,93 +167,145 @@ class DocumentService:
             document: IngestedDocument,
             workspace_id: str,
             source_type: DocumentSourceType,
-            source_id: str
-    ) -> List[DocumentCreate]:
-        """Process a single document by parsing and chunking its content.
+            source_id: str,
+            force_update: bool = False
+    ) -> Optional[Document]:
+        """Process document content through parsers and chunkers.
         
         Args:
             document: The document to process
             workspace_id: ID of the workspace
             source_type: Type of the source
             source_id: ID of the source
+            force_update: Whether to force update the document
             
         Returns:
-            List of document chunks ready for storage
+            The processed document or None if processing failed
         """
         try:
-            # Get the appropriate parser
+            # Get the appropriate parser for this document
             parser = self._get_parser_for_document(document)
             if not parser:
-                logger.warning(f"No suitable parser found for document {document.id}")
-                return []
+                logger.warning(f"No suitable parser found for document: {document.title}")
+                return None
 
             # Parse the document content
-            parsed_chunks = parser.parse_content(document.content, metadata=document.metadata)
-            if not parsed_chunks:
-                logger.warning(f"No content parsed from document {document.id}")
-                return []
+            parsed_content = await parser.parse(document.content)
+            
+            # Get the appropriate chunker for this document
+            chunker = self._get_chunker_for_document(document)
+            if not chunker:
+                logger.warning(f"No suitable chunker found for document: {document.title}")
+                return None
 
-            document_chunks = []
-
-            # Process each parsed chunk
-            for chunk_idx, chunk in enumerate(parsed_chunks):
-                # Get the appropriate chunker for this chunk type
-                chunker = self._get_chunker_for_document(
-                    document,
-                    content_type=chunk.get('type', 'text')
+            # Handle different parser output formats
+            if isinstance(parsed_content, list):
+                # If parser returns a list of chunks, use them directly
+                chunks = [
+                    {
+                        'content': chunk.get('content', ''),
+                        'metadata': {**document.metadata, **chunk.get('metadata', {})}
+                    }
+                    for chunk in parsed_content
+                    if chunk.get('content')
+                ]
+            else:
+                # If parser returns a string, use the chunker to split it
+                chunks = await chunker.chunk(
+                    content=str(parsed_content),
+                    metadata=document.metadata or {}
                 )
 
-                if not chunker:
-                    logger.warning(f"No suitable chunker found for chunk {chunk_idx} of document {document.id}")
-                    continue
+            # Create or update the document in the database
+            doc_data = {
+                "title": document.title,
+                "content": document.content,
+                "source_type": source_type,
+                "source_id": source_id,
+                "source_url": str(document.url) if document.url else None,
+                "metadata": {
+                    **document.metadata,
+                    "chunk_count": len(chunks),
+                    "parsed_content": parsed_content
+                },
+                "workspace_id": workspace_id
+            }
 
-                # Chunk the content
-                chunk_metadata = chunk.get('metadata', {})
-                chunk_metadata.update({
-                    'chunk_index': chunk_idx,
-                    'chunk_type': chunk.get('type', 'text'),
-                    'source_document_id': document.id,
-                    'source_document_title': document.title,
-                    'source_url': str(document.url) if document.url else None,
-                    'source_type': source_type.value,
-                    'source_id': source_id
-                })
+            # Check if document already exists
+            existing_docs = await self.repo.list_documents(
+                workspace_id=workspace_id,
+                source_type=source_type,
+                source_id=document.id
+            )
+            existing_doc = existing_docs[0] if existing_docs else None
 
-                # Add document metadata to chunk metadata
-                if hasattr(document, 'metadata') and isinstance(document.metadata, dict):
-                    chunk_metadata.update(document.metadata)
-
-                # Generate chunks using the chunker
-                chunks = chunker.chunk(
-                    content=chunk['content'],
-                    metadata=chunk_metadata
+            if existing_doc:
+                # Delete existing chunks before creating new ones
+                await self.chunk_repo.delete_chunks_by_document(str(existing_doc["_id"]))
+                
+                if not force_update:
+                    logger.info(f"Document {document.title} already exists, skipping update")
+                    return None
+                
+                # Update existing document
+                doc_data["updated_at"] = str(datetime.utcnow())
+                updated_doc = await self.repo.update_document(
+                    document_id=existing_doc["_id"],
+                    workspace_id=workspace_id,
+                    update_data=doc_data
                 )
+                document_id = str(existing_doc["_id"])
+            else:
+                # Create new document
+                document_id = await self.repo.create_document(doc_data)
+                updated_doc = await self.repo.get_document(document_id, workspace_id)
 
-                # Convert chunks to DocumentCreate objects
-                for i, chunk_data in enumerate(chunks):
-                    doc_metadata = chunk_data.get('metadata', {})
-                    doc_metadata.update({
-                        'chunk_index': i,
-                        'total_chunks': len(chunks),
-                        'chunk_type': chunk_metadata.get('chunk_type', 'text'),
-                        'parent_chunk_index': chunk_idx,
-                        'total_parent_chunks': len(parsed_chunks)
-                    })
+            if not updated_doc:
+                logger.error(f"Failed to create/update document: {document.title}")
+                return None
 
-                    document_chunks.append(DocumentCreate(
-                        title=f"{document.title} [Chunk {i + 1}/{len(chunks)}]" if len(chunks) > 1 else document.title,
-                        content=chunk_data['content'],
-                        source_type=source_type,
-                        source_id=source_id,
-                        source_url=document.url,
-                        metadata=doc_metadata
-                    ))
+            # Prepare chunks for batch insertion
+            chunks_to_insert = []
+            for i, chunk_content in enumerate(chunks):
+                chunk_data = {
+                    "document_id": document_id,
+                    "workspace_id": workspace_id,
+                    "content": chunk_content,
+                    "metadata": {
+                        "chunk_index": i,
+                        "source": source_type.value,
+                        "source_id": source_id,
+                        "document_title": document.title,
+                        **document.metadata
+                    }
+                }
+                
+                # Generate embedding if embedding agent is available
+                if self.embedding_agent:
+                    try:
+                        # Get embeddings for the chunk content
+                        embeddings = await self.embedding_agent.get_embeddings([chunk_content])
+                        if embeddings and len(embeddings) > 0:
+                            chunk_data["vector_embedding"] = embeddings[0].tolist()  # Convert numpy array to list
+                            chunk_data["metadata"]["has_embedding"] = True
+                        else:
+                            logger.warning(f"No embeddings returned for chunk {i}")
+                            chunk_data["metadata"]["has_embedding"] = False
+                    except Exception as e:
+                        logger.error(f"Error generating embedding for chunk {i}: {str(e)}")
+                        chunk_data["metadata"]["has_embedding"] = False
 
-            return document_chunks
+                chunks_to_insert.append(chunk_data)
+            
+            # Insert all chunks in a single batch
+            if chunks_to_insert:
+                await self.chunk_repo.create_chunks_batch(chunks_to_insert)
+
+            return Document(**updated_doc)
 
         except Exception as e:
-            logger.error(f"Error processing document {document.id}: {str(e)}", exc_info=True)
-            return []
+            logger.error(f"Error processing document {document.title}: {str(e)}", exc_info=True)
+            return None
 
     async def create_document(self, document: DocumentCreate, workspace_id: str) -> Document | None:
         """Create a new document with optional embeddings.
@@ -639,17 +713,31 @@ class DocumentService:
                     # Process each chunk as a separate document
                     for chunk in document_chunks:
                         try:
-                            # Create or update document for this chunk
+                            # Ensure chunk is a dictionary and has required fields
+                            if not isinstance(chunk, dict):
+                                logger.warning(f"Skipping invalid chunk type: {type(chunk)}")
+                                continue
+                                
+                            # Safely extract chunk data with defaults
+                            chunk_title = chunk.get('title', '')
+                            chunk_content = chunk.get('content', '')
+                            chunk_metadata = chunk.get('metadata', {})
+                            
+                            # Safely get document title
+                            doc_title = 'Document'
+                            if hasattr(doc, 'get') and callable(doc.get):
+                                doc_title = doc.get('title', 'Document')
+                            
+                            # Create document data with proper type handling
                             doc_data = DocumentCreate(
-                                title=chunk.title or f"{doc.title} [Chunk]" if hasattr(doc,
-                                                                                       'title') else "Untitled Document",
-                                content=chunk.content,
+                                title=chunk_title or f"{doc_title} [Chunk]",
+                                content=chunk_content,
                                 source_type=source_type,
                                 source_id=source_id,
-                                source_url=doc.url if hasattr(doc, 'url') else None,
+                                source_url=doc.get('url') if hasattr(doc, 'get') and callable(doc.get) else None,
                                 metadata={
-                                    **(doc.metadata if hasattr(doc, 'metadata') and doc.metadata else {}),
-                                    **chunk.metadata
+                                    **(doc.get('metadata', {}) if hasattr(doc, 'get') and callable(doc.get) else {}),
+                                    **chunk_metadata
                                 }
                             )
 

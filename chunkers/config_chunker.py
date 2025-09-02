@@ -9,7 +9,7 @@ class ConfigChunker(BaseChunker):
     def __init__(self, max_chunk_size: int = 500, overlap: int = 50):
         super().__init__(max_chunk_size, overlap)
     
-    def chunk(self, content: str, metadata: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    async def chunk(self, content: str, metadata: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """Chunk configuration content into logical sections.
         
         Args:

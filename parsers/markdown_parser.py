@@ -133,7 +133,7 @@ class MarkdownParser(BaseParser):
             
         return chunks
 
-    def parse(self, file_path: str | Path) -> List[Dict[str, str]]:
+    async def parse(self, file_path: str | Path) -> List[Dict[str, str]]:
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             content = f.read()
 

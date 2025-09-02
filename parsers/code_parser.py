@@ -189,7 +189,8 @@ class CodeParser(BaseParser):
 
     def _get_parser_for_file(self, file_path: str | Path) -> Optional[Tuple[Parser, str]]:
         """Get the appropriate parser for the given file."""
-        ext = Path(file_path).suffix.lstrip('.').lower()
+        file_path = Path(file_path)
+        ext = file_path.suffix.lstrip('.').lower()
 
         # Map file extensions to language names
         ext_to_lang = {
@@ -207,7 +208,16 @@ class CodeParser(BaseParser):
             'cs': 'c_sharp',
         }
 
+        # First try direct extension match
         lang = ext_to_lang.get(ext)
+        
+        # If no direct match, try to find a parser that supports this extension
+        if not lang:
+            for lang_name, parser in self.parsers.items():
+                if ext in self.supported_formats():
+                    lang = lang_name
+                    break
+
         if not lang or lang not in self.parsers:
             return None
 
@@ -295,7 +305,7 @@ class CodeParser(BaseParser):
 
         return chunks
 
-    def parse(self, file_path: str | Path) -> List[Dict[str, str]]:
+    async def parse(self, file_path: str | Path) -> List[Dict[str, str]]:
         """Parse a code file and return a list of chunks."""
         parser_lang = self._get_parser_for_file(file_path)
         if not parser_lang:

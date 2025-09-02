@@ -133,10 +133,10 @@ class TestParser(CodeParser):
 
         return tests
 
-    def parse(self, file_path: str | Path) -> List[Dict[str, str]]:
+    async def parse(self, file_path: str | Path) -> List[Dict[str, str]]:
         """Parse a test file and link it to its implementation."""
         # First, use the parent class to parse the test file
-        chunks = super().parse(file_path)
+        chunks = await super().parse(file_path)
 
         # Add test-specific metadata
         test_file_path = Path(file_path)

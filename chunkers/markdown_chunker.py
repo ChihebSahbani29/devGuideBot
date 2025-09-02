@@ -10,7 +10,7 @@ class MarkdownChunker(BaseChunker):
         super().__init__(max_chunk_size, overlap)
         self.header_pattern = re.compile(r'^(#+)\s*(.*)')
     
-    def chunk(self, content: str, metadata: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    async def chunk(self, content: str, metadata: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """Chunk markdown content by sections.
         
         Args:
